@@ -33,7 +33,7 @@ from lmcache.v1.distributed.l2_adapters.p2p_l2_adapter import (
     PeerL2AdapterBase,
     PeerL2AdapterConfigBase,
 )
-from lmcache.v1.distributed.memory_manager import BorrowedMemoryObj
+from lmcache.v1.distributed.memory_manager import BorrowedMemoryObj, Lease
 from lmcache.v1.distributed.transfer_channel.api import TransferChannelAddress
 from lmcache.v1.memory_management import MemoryObj
 
@@ -182,7 +182,11 @@ class LendingMockL2Adapter(LendingPeerL2AdapterBase):
         self._lookup_efd.notify()
 
     def _process_lookup_result(
-        self, keys: list[ObjectKey], addresses: list[TransferChannelAddress]
+        self,
+        task_id: L2TaskId,
+        keys: list[ObjectKey],
+        addresses: list[TransferChannelAddress],
+        started_at: float,
     ) -> Bitmap:
         bitmap = Bitmap(len(keys))
         for i, (key, address) in enumerate(zip(keys, addresses, strict=True)):
@@ -191,14 +195,14 @@ class LendingMockL2Adapter(LendingPeerL2AdapterBase):
                 self._reserved[key] = self._reserved.get(key, 0) + 1
         return bitmap
 
-    def submit_unlock(self, keys: list[ObjectKey]) -> None:
+    def submit_unlock(self, keys: list[ObjectKey], *, wait: bool = False) -> None:
         """Return one reservation per key; a key whose reservation a load
         bound into a view is skipped, the view returns it."""
         unlent = [key for key in keys if self._reserved.get(key, 0)]
         for key in unlent:
             self._reserved[key] -= 1
         if unlent:
-            PeerL2AdapterBase.submit_unlock(self, unlent)
+            PeerL2AdapterBase.submit_unlock(self, unlent, wait=wait)
 
     # -- lending: the load binds the shadow's placeholders -------------------
 
@@ -253,7 +257,17 @@ class LendingMockL2Adapter(LendingPeerL2AdapterBase):
         pass
 
     def _unregister_peer_region(self) -> None:
-        pass
+        self._drain_borrows_for_close()
+
+    # The mock binds in its own submit_load_task, so the base's hooks are
+    # never reached.
+    def _accept_address(self, address: TransferChannelAddress) -> bool:
+        raise NotImplementedError
+
+    def _bind_borrowed_object(
+        self, obj: BorrowedMemoryObj, address: TransferChannelAddress, lease: Lease
+    ) -> bool:
+        raise NotImplementedError
 
 
 def _create_lending_mock_adapter(

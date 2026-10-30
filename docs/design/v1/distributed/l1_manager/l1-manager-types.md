@@ -147,6 +147,10 @@ finish_write_and_reserve_read ──► resident, read-locked ──► readers
 - **Status.** Tags are `(segment, SHADOW)`, so no copying adapter binds to a
   shadow and P2P never re-exports a view. A shadow is listed under
   `l1_managers` and makes `is_multi_l1` true.
+- **Lenders.** The GPU-direct peer adapter (`p2p_gdr`,
+  [../l2_adapters/gdr_peer_l2_adapter.md](../l2_adapters/gdr_peer_l2_adapter.md))
+  binds placeholders to `read_into` handles of a peer's DRAM L1 objects,
+  read into GPU memory at retrieve time.
 
 ## Addressing one L1
 

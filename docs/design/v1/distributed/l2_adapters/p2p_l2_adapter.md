@@ -33,7 +33,9 @@ the full system context.
 ```
 PeerL2AdapterBase             lookup/unlock RPCs, event fds, no-op stores, close
 ├── P2PL2Adapter              import the peer region; RDMA load over the transfer channel
-└── LendingPeerL2AdapterBase  abstract: lend the peer's bytes; its load binds a shadow L1's placeholders
+└── LendingPeerL2AdapterBase  lend the peer's bytes: per-key reservations under the owner's
+    │                         lock, a load that binds the shadow L1's placeholders, batched unlocks
+    └── GdrPeerL2Adapter      remote handles (see [gdr_peer_l2_adapter.md](gdr_peer_l2_adapter.md))
 ```
 
 The base holds the RPC control plane so another way of reading a peer can
@@ -59,15 +61,19 @@ means, while the polling, timeout and failure handling around it stay shared:
 
 `LendingPeerL2AdapterBase` goes through the prefetch controller's ordinary
 load pipeline: the controller stages a `BorrowedMemoryObj` placeholder per
-planned key in the shadow L1 and submits a load with them; the lender's
-`submit_load_task` binds each placeholder to the key's reservation (its lease)
-and to the bytes. A reservation bound into an object belongs to the object and
-returns at its release; `submit_unlock` returns only the others. The base
-adds one abstract method, `get_active_borrow_count`, which removal waits on.
-The adapter wants a `SHADOW` L1 first (`borrowed_segment`), carries the shadow
-L1 the storage manager binds to it (`bind_shadow_l1`) and closes it with
-itself; serde is refused. See `../l1_manager/l1-manager-types.md`, "Shadow
-L1".
+planned key in the shadow L1 and submits a load with them; `submit_load_task`
+binds each placeholder to the key's reservation (its lease) through the
+`_bind_borrowed_object` hook, and `_accept_address` says whether a hit is
+usable at all. `_process_lookup_result(task_id, keys, addresses, started_at)`
+receives the time just before the lookup RPC was sent, a lower bound on when
+the owner's read locks started; `submit_unlock(keys, wait=True)` waits for the
+owner's acknowledgment, which lenders use so peer removal drains their
+unlocks. A reservation bound into an object belongs to the object and returns
+at its release; `submit_unlock` returns only the others, and removal waits on
+`get_active_borrow_count`. The adapter wants a `SHADOW` L1 first
+(`borrowed_segment`), carries the shadow L1 the storage manager binds to it
+(`bind_shadow_l1`) and closes it with itself; serde is refused. See
+`../l1_manager/l1-manager-types.md`, "Shadow L1".
 
 ## Lifecycle
 
